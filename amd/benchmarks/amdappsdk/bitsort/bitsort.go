@@ -1,6 +1,6 @@
 // Package bitonicsort implements the bitonicsort benchmark from
 // AMDAPPSDK.
-package bitonicsort
+package bitsort
 
 import (
 	"fmt"

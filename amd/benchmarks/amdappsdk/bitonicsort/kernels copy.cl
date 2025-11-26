@@ -1,0 +1,114 @@
+/**********************************************************************
+Copyright ©2014 Advanced Micro Devices, Inc. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+• Redistributions of source code must retain the above copyright notice, this
+list of conditions and the following disclaimer.
+
+• Redistributions in binary form must reproduce the above copyright notice, this
+list of conditions and the following disclaimer in the documentation and/or
+other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+ FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ ********************************************************************/
+
+/*
+ * For a description of the algorithm and the terms used, please see the
+ * documentation for this sample.
+ *
+ * One invocation of this kernel, i.e one work thread writes two output values.
+ * Since every pass of this algorithm does width/2 comparisons, each compare
+ * operation is done by one work thread.
+ *
+ * Depending of the direction of sort for the work thread, the output values
+ * are written either as greater value to left element or lesser value to the
+ * left element. Right element and left element are the two elements we are
+ * comparing and "left" is the element with a smaller index into the array.
+ *
+ * if direction is CL_TRUE, i.e evaluates to non zero, it means "increasing".
+ *
+ * For an explanation of the terms "blockWidth", "sameDirectionBlockWidth",
+ * stage, pass, pairDistance please go through the document shipped with this
+ * sample.
+ *
+ * Since an explanation of the terms and the code here would be quite lengthy,
+ * confusing and will greatly reduce the readability of this kernel, the code
+ * has been explained in detail in the document mentioned above. */
+
+__kernel void BitonicSort(__global uint* array, const uint stage,
+                         const uint passOfStage, const uint direction) {
+    
+    // 使用共享内存缓存数据
+    __local uint local_data[128]; // 64个线程，每个处理2个元素
+    
+    uint threadId = get_global_id(0);
+    uint localId = get_local_id(0);
+    uint groupId = get_group_id(0);
+    
+    // 每个工作组处理128个元素
+    uint group_base = groupId * 128;
+    uint element1_idx = group_base + localId;
+    uint element2_idx = group_base + localId + 64;
+    
+    // 加载数据到共享内存（每个线程加载2个元素）
+    local_data[localId] = array[element1_idx];
+    local_data[localId + 64] = array[element2_idx];
+    
+    // 等待所有线程完成数据加载
+    barrier(CLK_LOCAL_MEM_FENCE);
+    
+    // 计算比较对的索引（在共享内存中）
+    uint pairDistance = 1 << (stage - passOfStage);
+    uint blockWidth = 2 * pairDistance;
+    
+    uint leftId = (localId % pairDistance) + (localId / pairDistance) * blockWidth;
+    uint rightId = leftId + pairDistance;
+    
+    // 确保索引在共享内存范围内
+    if (rightId < 128) {
+        uint leftElement = local_data[leftId];
+        uint rightElement = local_data[rightId];
+        
+        uint sameDirectionBlockWidth = 1 << stage;
+        uint sortIncreasing = direction;
+        
+        // 使用全局线程ID计算方向（保持原有逻辑）
+        if ((threadId / sameDirectionBlockWidth) % 2 == 1)
+            sortIncreasing = 1 - sortIncreasing;
+        
+        // 比较和交换（在共享内存中）
+        if (leftElement > rightElement) {
+            if (sortIncreasing) {
+                // 升序：交换元素
+                local_data[leftId] = rightElement;
+                local_data[rightId] = leftElement;
+            }
+            // 降序：保持原样
+        } else {
+            if (!sortIncreasing) {
+                // 降序：交换元素
+                local_data[leftId] = rightElement;
+                local_data[rightId] = leftElement;
+            }
+            // 升序：保持原样
+        }
+    }
+    
+    // 等待所有线程完成计算
+    barrier(CLK_LOCAL_MEM_FENCE);
+    
+    // 将结果写回全局内存
+    array[element1_idx] = local_data[localId];
+    array[element2_idx] = local_data[localId + 64];
+}

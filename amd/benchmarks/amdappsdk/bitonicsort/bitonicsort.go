@@ -87,6 +87,7 @@ func (b *Benchmark) Run() {
 }
 
 func (b *Benchmark) initMem() {
+	b.Length = 1024
 	b.inputData = make([]uint32, b.Length)
 	b.outputData = make([]uint32, b.Length)
 	for i := 0; i < b.Length; i++ {
